@@ -15,7 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from roma_dspy.config.schemas.storage import PostgresConfig
 from roma_dspy.types.checkpoint_models import CheckpointData, CheckpointState, CheckpointTrigger
 from roma_dspy.types import ExecutionStatus
-from roma_dspy.core.storage.models import Base, Execution, Checkpoint, TaskTrace, LMTrace, CircuitBreaker, EventTrace, ToolkitTrace, ToolInvocationTrace
+from roma_dspy.core.storage.models import Base, Execution, Checkpoint, TaskTrace, LMTrace, CircuitBreaker, EventTrace, ToolkitTrace, ToolInvocationTrace, UIEventTrace
 
 
 class _ThreadLocalState(threading.local):
@@ -1020,6 +1020,41 @@ class PostgresStorage:
             await session.flush()
             logger.debug(f"Saved tool invocation trace: {toolkit_class}.{tool_name}")
             return trace
+
+    # ==================== UI Event Operations ====================
+
+    async def save_ui_event(
+        self,
+        execution_id: str,
+        event_type: str,
+        data: Dict[str, Any],
+        timestamp: Optional[datetime] = None
+    ) -> UIEventTrace:
+        """Save UI event for frontend streaming.
+
+        Args:
+            execution_id: Execution identifier
+            event_type: Event type (user-defined string)
+            data: Event data (JSON-serializable dict)
+            timestamp: Optional timestamp (default: now)
+
+        Returns:
+            Created UIEventTrace model
+
+        Raises:
+            SQLAlchemyError: On database error
+        """
+        async with self.session() as session:
+            event = UIEventTrace(
+                execution_id=execution_id,
+                event_type=event_type,
+                data=data,
+                timestamp=timestamp or datetime.now(timezone.utc)
+            )
+            session.add(event)
+            await session.flush()
+            logger.debug(f"Saved UI event: {event_type} for execution {execution_id}")
+            return event
 
     async def get_toolkit_traces(
         self,

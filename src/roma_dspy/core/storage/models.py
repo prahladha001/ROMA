@@ -457,3 +457,29 @@ class ToolInvocationTrace(Base):
         Index("idx_tool_invocation_success", "success"),
         Index("idx_tool_invocation_composite", "toolkit_class", "tool_name", "success"),
     )
+
+
+class UIEventTrace(Base):
+    """
+    UI event traces for frontend visualization.
+
+    Simple event model for streaming execution events to the UI.
+    Separate from EventTrace (task orchestration) - purely for visualization.
+    """
+    __tablename__ = "ui_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    execution_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    data: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    timestamp: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True
+    )
+
+    __table_args__ = (
+        Index("idx_ui_events_stream", "execution_id", "id", postgresql_using="btree"),
+        Index("idx_ui_events_type", "event_type"),
+    )
