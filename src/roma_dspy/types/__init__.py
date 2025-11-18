@@ -44,6 +44,7 @@ from .error_types import (
     serialize_error,
     error_to_dict
 )
+from .external_observer_event import ExternalObserverEvent
 
 __all__ = [
     "AdapterType",
@@ -105,4 +106,5 @@ __all__ = [
     "RetryExhaustedError",
     "serialize_error",
     "error_to_dict",
+    "ExternalObserverEvent",
 ]
