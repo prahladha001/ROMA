@@ -376,7 +376,8 @@ class RecursiveSolver:
         self,
         task: Union[str, TaskNode],
         dag: Optional[TaskDAG] = None,
-        depth: int = 0
+        depth: int = 0,
+        execution_id: Optional[str] = None
     ) -> TaskNode:
         """
         Synchronously solve a task using recursive decomposition.
@@ -388,17 +389,19 @@ class RecursiveSolver:
             task: Task goal string or TaskNode
             dag: Optional DAG to track execution
             depth: Current recursion depth
+            execution_id: Optional execution ID to use for this execution
 
         Returns:
             Completed TaskNode with results
         """
-        return asyncio.run(self.async_solve(task, dag, depth))
+        return asyncio.run(self.async_solve(task, dag, depth, execution_id))
 
     async def async_solve(
         self,
         task: Union[str, TaskNode],
         dag: Optional[TaskDAG] = None,
-        depth: int = 0
+        depth: int = 0,
+        execution_id: Optional[str] = None
     ) -> TaskNode:
         """
         Asynchronously solve a task using recursive decomposition.
@@ -407,18 +410,15 @@ class RecursiveSolver:
             task: Task goal string or TaskNode
             dag: Optional DAG to track execution
             depth: Current recursion depth
+            execution_id: Optional execution ID to use for this execution
 
         Returns:
             Completed TaskNode with results
         """
         logger.debug(f"Starting async_solve for task: {task if isinstance(task, str) else task.goal}")
 
-        # Start UI event emitter if available (BEFORE initializing DAG to capture first node)
-        if self.ui_event_emitter:
-            await self.ui_event_emitter.start()
-
         # Initialize task and DAG
-        task, dag = self._initialize_task_and_dag(task, dag, depth)
+        task, dag = self._initialize_task_and_dag(task, dag, depth, execution_id)
 
         # Setup observability using ObservabilityManager
         await self.observability.setup_execution(task, dag, self.config, depth, execution_mode="recursive")
@@ -463,6 +463,19 @@ class RecursiveSolver:
                     # Finalize execution using ObservabilityManager
                     await self.observability.finalize_execution(dag, result)
 
+                    # Emit final_response UI event
+                    if self.ui_event_emitter and self.ui_event_emitter.is_enabled():
+                        await self.ui_event_emitter.emit(
+                            execution_id=dag.execution_id,
+                            event_type="final_response",
+                            data={
+                                "status": result.status.value,
+                                "result": str(result.result) if result.result else None,
+                                "execution_duration": result.execution_duration,
+                                "completed_at": result.completed_at.isoformat() if result.completed_at else None
+                            }
+                        )
+
                     return result
             else:
                 result = await self._async_solve_internal(task, dag, depth)
@@ -484,7 +497,35 @@ class RecursiveSolver:
                 # Finalize execution using ObservabilityManager
                 await self.observability.finalize_execution(dag, result)
 
+                # Emit final_response UI event
+                if self.ui_event_emitter and self.ui_event_emitter.is_enabled():
+                    await self.ui_event_emitter.emit(
+                        execution_id=dag.execution_id,
+                        event_type="final_response",
+                        data={
+                            "status": result.status.value,
+                            "result": str(result.result) if result.result else None,
+                            "execution_duration": result.execution_duration,
+                            "completed_at": result.completed_at.isoformat() if result.completed_at else None
+                        }
+                    )
+
                 return result
+        except Exception as e:
+            # Emit execution_failure UI event
+            if self.ui_event_emitter and self.ui_event_emitter.is_enabled():
+                await self.ui_event_emitter.emit(
+                    execution_id=dag.execution_id,
+                    event_type="execution_failure",
+                    data={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "task_id": task.task_id if task else None,
+                        "goal": task.goal if task else None
+                    }
+                )
+            # Re-raise the exception to maintain existing error handling behavior
+            raise
         finally:
             # Stop periodic checkpoints if running
             if self.checkpoint_manager:
@@ -497,10 +538,6 @@ class RecursiveSolver:
             # Auto-persist metrics (including cleanup events) and reset context
             if hasattr(dag, '_exec_context_token'):
                 await ExecutionContext.reset_async(dag._exec_context_token, self.postgres_storage)
-
-            # Stop UI event emitter and flush remaining events
-            if self.ui_event_emitter:
-                await self.ui_event_emitter.stop()
 
             logger.debug(f"Cleaned up execution for {dag.execution_id}")
 
@@ -774,7 +811,8 @@ class RecursiveSolver:
         self,
         task: Union[str, TaskNode],
         dag: Optional[TaskDAG],
-        depth: int
+        depth: int,
+        execution_id: Optional[str] = None
     ) -> Tuple[TaskNode, TaskDAG]:
         """Initialize task node and DAG for execution."""
         # Track whether we're creating a new DAG
@@ -782,7 +820,10 @@ class RecursiveSolver:
 
         # Create DAG if not provided
         if dag is None:
-            dag = TaskDAG(ui_event_emitter=self.ui_event_emitter)
+            dag = TaskDAG(
+                ui_event_emitter=self.ui_event_emitter,
+                execution_id=execution_id
+            )
             self.last_dag = dag  # Store for visualization
 
         # Create new ContextManager for each new DAG to ensure execution isolation

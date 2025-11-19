@@ -925,8 +925,10 @@ class TaskDAG:
     def _emit_ui_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """Emit a UI event if emitter is available."""
         if not self.ui_event_emitter:
+            logger.debug(f"UI event emitter not available for event '{event_type}'")
             return
 
+        logger.debug(f"Emitting UI event '{event_type}' with execution_id: {self.execution_id}")
         try:
             self.ui_event_emitter.emit_sync(
                 execution_id=self.execution_id,
@@ -934,7 +936,7 @@ class TaskDAG:
                 data=data
             )
         except Exception as e:
-            logger.debug(f"Failed to emit UI event '{event_type}': {e}")
+            logger.warning(f"Failed to emit UI event '{event_type}': {e}")
 
     def _extract_task_details(self, task: TaskNode) -> Dict[str, Any]:
         """Extract task details for UI events."""
@@ -951,6 +953,7 @@ class TaskDAG:
 
     def _emit_node_added(self, task: TaskNode) -> None:
         """Emit node_added event."""
+        logger.debug(f"Emitting node_added event for task: {task.task_id[:8]} - {task.goal[:50]}")
         self._emit_ui_event("node_added", self._extract_task_details(task))
 
     def _emit_node_updated(self, task: TaskNode) -> None:
