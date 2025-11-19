@@ -25,6 +25,7 @@ from roma_dspy.types.checkpoint_models import CheckpointConfig
 from roma_dspy.resilience.checkpoint_manager import CheckpointManager
 from roma_dspy.config.schemas.root import ROMAConfig
 from roma_dspy.core.observability import MLflowManager, ObservabilityManager
+from roma_dspy.core.observability.ui_event_emitter import UIEventEmitter
 from roma_dspy.tools.base.manager import ToolkitManager
 
 if TYPE_CHECKING:
@@ -86,6 +87,11 @@ class RecursiveSolver:
         self.postgres_storage = None
         if config and config.storage and config.storage.postgres and config.storage.postgres.enabled:
             self.postgres_storage = PostgresStorage(config.storage.postgres)
+
+        # Initialize UI event emitter if Postgres is enabled
+        self.ui_event_emitter = None
+        if self.postgres_storage:
+            self.ui_event_emitter = UIEventEmitter(postgres_storage=self.postgres_storage)
 
         # Initialize checkpoint system
         self.checkpoint_enabled = enable_checkpoints
@@ -370,7 +376,8 @@ class RecursiveSolver:
         self,
         task: Union[str, TaskNode],
         dag: Optional[TaskDAG] = None,
-        depth: int = 0
+        depth: int = 0,
+        execution_id: Optional[str] = None
     ) -> TaskNode:
         """
         Synchronously solve a task using recursive decomposition.
@@ -382,17 +389,19 @@ class RecursiveSolver:
             task: Task goal string or TaskNode
             dag: Optional DAG to track execution
             depth: Current recursion depth
+            execution_id: Optional execution ID to use for this execution
 
         Returns:
             Completed TaskNode with results
         """
-        return asyncio.run(self.async_solve(task, dag, depth))
+        return asyncio.run(self.async_solve(task, dag, depth, execution_id))
 
     async def async_solve(
         self,
         task: Union[str, TaskNode],
         dag: Optional[TaskDAG] = None,
-        depth: int = 0
+        depth: int = 0,
+        execution_id: Optional[str] = None
     ) -> TaskNode:
         """
         Asynchronously solve a task using recursive decomposition.
@@ -401,6 +410,7 @@ class RecursiveSolver:
             task: Task goal string or TaskNode
             dag: Optional DAG to track execution
             depth: Current recursion depth
+            execution_id: Optional execution ID to use for this execution
 
         Returns:
             Completed TaskNode with results
@@ -408,7 +418,7 @@ class RecursiveSolver:
         logger.debug(f"Starting async_solve for task: {task if isinstance(task, str) else task.goal}")
 
         # Initialize task and DAG
-        task, dag = self._initialize_task_and_dag(task, dag, depth)
+        task, dag = self._initialize_task_and_dag(task, dag, depth, execution_id)
 
         # Setup observability using ObservabilityManager
         await self.observability.setup_execution(task, dag, self.config, depth, execution_mode="recursive")
@@ -453,6 +463,19 @@ class RecursiveSolver:
                     # Finalize execution using ObservabilityManager
                     await self.observability.finalize_execution(dag, result)
 
+                    # Emit final_response UI event
+                    if self.ui_event_emitter and self.ui_event_emitter.is_enabled():
+                        await self.ui_event_emitter.emit(
+                            execution_id=dag.execution_id,
+                            event_type="final_response",
+                            data={
+                                "status": result.status.value,
+                                "result": str(result.result) if result.result else None,
+                                "execution_duration": result.execution_duration,
+                                "completed_at": result.completed_at.isoformat() if result.completed_at else None
+                            }
+                        )
+
                     return result
             else:
                 result = await self._async_solve_internal(task, dag, depth)
@@ -474,7 +497,35 @@ class RecursiveSolver:
                 # Finalize execution using ObservabilityManager
                 await self.observability.finalize_execution(dag, result)
 
+                # Emit final_response UI event
+                if self.ui_event_emitter and self.ui_event_emitter.is_enabled():
+                    await self.ui_event_emitter.emit(
+                        execution_id=dag.execution_id,
+                        event_type="final_response",
+                        data={
+                            "status": result.status.value,
+                            "result": str(result.result) if result.result else None,
+                            "execution_duration": result.execution_duration,
+                            "completed_at": result.completed_at.isoformat() if result.completed_at else None
+                        }
+                    )
+
                 return result
+        except Exception as e:
+            # Emit execution_failure UI event
+            if self.ui_event_emitter and self.ui_event_emitter.is_enabled():
+                await self.ui_event_emitter.emit(
+                    execution_id=dag.execution_id,
+                    event_type="execution_failure",
+                    data={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "task_id": task.task_id if task else None,
+                        "goal": task.goal if task else None
+                    }
+                )
+            # Re-raise the exception to maintain existing error handling behavior
+            raise
         finally:
             # Stop periodic checkpoints if running
             if self.checkpoint_manager:
@@ -760,7 +811,8 @@ class RecursiveSolver:
         self,
         task: Union[str, TaskNode],
         dag: Optional[TaskDAG],
-        depth: int
+        depth: int,
+        execution_id: Optional[str] = None
     ) -> Tuple[TaskNode, TaskDAG]:
         """Initialize task node and DAG for execution."""
         # Track whether we're creating a new DAG
@@ -768,7 +820,10 @@ class RecursiveSolver:
 
         # Create DAG if not provided
         if dag is None:
-            dag = TaskDAG()
+            dag = TaskDAG(
+                ui_event_emitter=self.ui_event_emitter,
+                execution_id=execution_id
+            )
             self.last_dag = dag  # Store for visualization
 
         # Create new ContextManager for each new DAG to ensure execution isolation
@@ -887,7 +942,7 @@ class RecursiveSolver:
             logger.info(f"Creating unified system checkpoint for trigger: {trigger}")
 
             # Use provided DAG or create a minimal one
-            target_dag = dag or TaskDAG("unified_checkpoint")
+            target_dag = dag or TaskDAG("unified_checkpoint", ui_event_emitter=self.ui_event_emitter)
             if task_context and dag is None:
                 target_dag.add_node(task_context)
 
@@ -957,7 +1012,7 @@ class RecursiveSolver:
             recovery_plan.restore_module_states = True
 
             # Create a temporary DAG for restoration
-            temp_dag = TaskDAG("restoration_target")
+            temp_dag = TaskDAG("restoration_target", ui_event_emitter=self.ui_event_emitter)
 
             # Apply recovery plan
             restored_dag = await self.checkpoint_manager.apply_recovery_plan(recovery_plan, temp_dag)
