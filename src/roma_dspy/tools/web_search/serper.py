@@ -136,7 +136,7 @@ class SerperToolkit(BaseToolkit):
                 "success": True,
                 "query": query,
                 "results_count": len(results),
-                "results": results,
+                "results": results
                 # "raw_response": raw_response
             }
 
@@ -199,7 +199,7 @@ class SerperToolkit(BaseToolkit):
                 "success": True,
                 "query": query,
                 "results_count": len(results),
-                "results": results,
+                "results": results
                 # "raw_response": raw_response
             }
 
@@ -258,7 +258,7 @@ class SerperToolkit(BaseToolkit):
                 "success": True,
                 "query": query,
                 "results_count": len(results),
-                "results": results,
+                "results": results
                 # "raw_response": raw_response
             }
 
