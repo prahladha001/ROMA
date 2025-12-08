@@ -136,8 +136,8 @@ class SerperToolkit(BaseToolkit):
                 "success": True,
                 "query": query,
                 "results_count": len(results),
-                "results": results,
-                "raw_response": raw_response
+                "results": results
+                # "raw_response": raw_response
             }
 
             self.log_debug(f"Web search completed: {len(results)} results for '{query}'")
@@ -199,8 +199,8 @@ class SerperToolkit(BaseToolkit):
                 "success": True,
                 "query": query,
                 "results_count": len(results),
-                "results": results,
-                "raw_response": raw_response
+                "results": results
+                # "raw_response": raw_response
             }
 
             self.log_debug(f"News search completed: {len(results)} results for '{query}'")
@@ -258,8 +258,8 @@ class SerperToolkit(BaseToolkit):
                 "success": True,
                 "query": query,
                 "results_count": len(results),
-                "results": results,
-                "raw_response": raw_response
+                "results": results
+                # "raw_response": raw_response
             }
 
             self.log_debug(f"Scholar search completed: {len(results)} results for '{query}'")
@@ -270,73 +270,73 @@ class SerperToolkit(BaseToolkit):
             self.log_error(error_msg)
             return json.dumps({"success": False, "error": error_msg})
 
-    async def scrape_webpage(self, url: str, markdown: bool = False) -> str:
-        """
-        Scrape and extract content from a webpage.
+    # async def scrape_webpage(self, url: str, markdown: bool = False) -> str:
+    #     """
+    #     Scrape and extract content from a webpage.
 
-        Use this tool to extract text content from web pages for analysis or information gathering.
-        Can return content in plain text or markdown format.
+    #     Use this tool to extract text content from web pages for analysis or information gathering.
+    #     Can return content in plain text or markdown format.
 
-        Args:
-            url: URL of the webpage to scrape
-            markdown: Whether to return content in markdown format (default: False)
+    #     Args:
+    #         url: URL of the webpage to scrape
+    #         markdown: Whether to return content in markdown format (default: False)
 
-        Returns:
-            JSON string with extracted webpage content
+    #     Returns:
+    #         JSON string with extracted webpage content
 
-        Examples:
-            scrape_webpage("https://example.com/article") - Extract article text
-            scrape_webpage("https://blog.com/post", markdown=True) - Get content as markdown
-            scrape_webpage("https://news.com/story") - Scrape news article content
-        """
-        try:
-            # Validate URL
-            if not url.startswith(('http://', 'https://')):
-                error_msg = "URL must start with http:// or https://"
-                self.log_error(error_msg)
-                return json.dumps({"success": False, "error": error_msg})
+    #     Examples:
+    #         scrape_webpage("https://example.com/article") - Extract article text
+    #         scrape_webpage("https://blog.com/post", markdown=True) - Get content as markdown
+    #         scrape_webpage("https://news.com/story") - Scrape news article content
+    #     """
+    #     try:
+    #         # Validate URL
+    #         if not url.startswith(('http://', 'https://')):
+    #             error_msg = "URL must start with http:// or https://"
+    #             self.log_error(error_msg)
+    #             return json.dumps({"success": False, "error": error_msg})
 
-            # Make async request to scrape the webpage
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+    #         # Make async request to scrape the webpage
+    #         headers = {
+    #             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    #         }
 
-            self.log_debug(f"Scraping webpage: {url} (markdown={markdown})")
-            client = await self._get_client()
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
+    #         self.log_debug(f"Scraping webpage: {url} (markdown={markdown})")
+    #         client = await self._get_client()
+    #         response = await client.get(url, headers=headers)
+    #         response.raise_for_status()
 
-            # Try to extract readable content
-            content = response.text
+    #         # Try to extract readable content
+    #         content = response.text
 
-            # Basic content extraction (could be enhanced with BeautifulSoup)
-            # For now, return raw HTML - in production, would parse and clean
-            if markdown:
-                # Simple markdown conversion could be added here
-                extracted_content = content
-            else:
-                extracted_content = content
+    #         # Basic content extraction (could be enhanced with BeautifulSoup)
+    #         # For now, return raw HTML - in production, would parse and clean
+    #         if markdown:
+    #             # Simple markdown conversion could be added here
+    #             extracted_content = content
+    #         else:
+    #             extracted_content = content
 
-            result = {
-                "success": True,
-                "url": url,
-                "content": extracted_content,
-                "content_length": len(extracted_content),
-                "format": "markdown" if markdown else "html"
-            }
+    #         result = {
+    #             "success": True,
+    #             "url": url,
+    #             "content": extracted_content,
+    #             "content_length": len(extracted_content),
+    #             "format": "markdown" if markdown else "html"
+    #         }
 
-            self.log_debug(f"Webpage scraped successfully: {len(extracted_content)} characters")
-            return json.dumps(result)
+    #         self.log_debug(f"Webpage scraped successfully: {len(extracted_content)} characters")
+    #         return json.dumps(result)
 
-        except httpx.TimeoutException:
-            error_msg = f"Timeout while scraping webpage: {url}"
-            self.log_error(error_msg)
-            return json.dumps({"success": False, "error": error_msg})
-        except httpx.RequestError as e:
-            error_msg = f"Error scraping webpage {url}: {str(e)}"
-            self.log_error(error_msg)
-            return json.dumps({"success": False, "error": error_msg})
-        except Exception as e:
-            error_msg = f"Unexpected error scraping webpage: {str(e)}"
-            self.log_error(error_msg)
-            return json.dumps({"success": False, "error": error_msg})
+    #     except httpx.TimeoutException:
+    #         error_msg = f"Timeout while scraping webpage: {url}"
+    #         self.log_error(error_msg)
+    #         return json.dumps({"success": False, "error": error_msg})
+    #     except httpx.RequestError as e:
+    #         error_msg = f"Error scraping webpage {url}: {str(e)}"
+    #         self.log_error(error_msg)
+    #         return json.dumps({"success": False, "error": error_msg})
+    #     except Exception as e:
+    #         error_msg = f"Unexpected error scraping webpage: {str(e)}"
+    #         self.log_error(error_msg)
+    #         return json.dumps({"success": False, "error": error_msg})

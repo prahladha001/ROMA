@@ -2,7 +2,7 @@
 NetworkX-based DAG implementation for task dependency management and execution.
 """
 
-from typing import Dict, List, Optional, Set, Tuple, Any
+from typing import Dict, List, Optional, Set, Tuple, Any, Callable
 import networkx as nx
 from datetime import datetime
 from uuid import uuid4
@@ -10,7 +10,7 @@ from uuid import uuid4
 from loguru import logger
 
 from roma_dspy.core.signatures.base_models.task_node import TaskNode
-from roma_dspy.types import TaskStatus, NodeType
+from roma_dspy.types import TaskStatus, NodeType, ExternalObserverEvent
 
 
 class TaskDAG:
@@ -24,7 +24,13 @@ class TaskDAG:
     - Comprehensive state management
     """
 
-    def __init__(self, dag_id: Optional[str] = None, parent_dag: Optional['TaskDAG'] = None, execution_id: Optional[str] = None):
+    def __init__(
+        self,
+        dag_id: Optional[str] = None,
+        parent_dag: Optional['TaskDAG'] = None,
+        execution_id: Optional[str] = None,
+        event_callback: Optional[Callable[[ExternalObserverEvent], None]] = None
+    ):
         """
         Initialize a new TaskDAG.
 
@@ -32,12 +38,14 @@ class TaskDAG:
             dag_id: Unique identifier for this DAG
             parent_dag: Parent DAG if this is a subgraph
             execution_id: Unique identifier for this execution run
+            event_callback: Optional callback for external observability events
         """
         self.dag_id = dag_id or str(uuid4())
         self.execution_id = execution_id or str(uuid4())
         self.graph = nx.DiGraph()
         self.parent_dag = parent_dag
         self.subgraphs: Dict[str, 'TaskDAG'] = {}
+        self.event_callback = event_callback
         self.metadata = {
             'created_at': datetime.now(),
             'updated_at': datetime.now(),
@@ -92,6 +100,10 @@ class TaskDAG:
         self._validate_dag_integrity()
 
         self.metadata['updated_at'] = datetime.now()
+
+        # Emit event to external observers
+        self._emit_node_added(task)
+
         return task
 
     def _validate_node_addition(self, task: TaskNode, parent_id: Optional[str]) -> None:
@@ -177,6 +189,9 @@ class TaskDAG:
 
         self.metadata['updated_at'] = datetime.now()
 
+        # Emit event to external observers
+        self._emit_dependency_added(from_task_id, to_task_id)
+
     def add_dependencies(
         self,
         task_id: str,
@@ -238,6 +253,9 @@ class TaskDAG:
         self.graph.nodes[task.task_id]['task'] = task
         self.graph.nodes[task.task_id]['updated_at'] = datetime.now()
         self.metadata['updated_at'] = datetime.now()
+
+        # Emit event to external observers
+        self._emit_node_updated(task)
 
     def get_ready_tasks(self, include_subgraphs: bool = False) -> List[TaskNode]:
         """
@@ -322,7 +340,12 @@ class TaskDAG:
             New TaskDAG instance for the subgraph
         """
         subgraph_id = f"{self.dag_id}_sub_{parent_task_id}"
-        subgraph = TaskDAG(dag_id=subgraph_id, parent_dag=self, execution_id=self.execution_id)
+        subgraph = TaskDAG(
+            dag_id=subgraph_id,
+            parent_dag=self,
+            execution_id=self.execution_id,
+            event_callback=self.event_callback
+        )
 
         # Get parent task for depth calculation
         parent_task = self.get_node(parent_task_id)
@@ -891,3 +914,53 @@ class TaskDAG:
             Execution ID string
         """
         return self.execution_id
+
+    # ------------------------------------------------------------------
+    # External Observer Event Helpers
+    # ------------------------------------------------------------------
+
+    def _emit_event(self, event_type: str, data: Dict[str, Any]) -> None:
+        """Emit an event to external observers if callback is available."""
+        if not self.event_callback:
+            logger.debug(f"Event callback not available for event '{event_type}'")
+            return
+
+        logger.debug(f"Emitting event '{event_type}' with execution_id: {self.execution_id}")
+        try:
+            event = ExternalObserverEvent(
+                execution_id=self.execution_id,
+                event_type=event_type,
+                data=data
+            )
+            self.event_callback(event)
+        except Exception as e:
+            logger.warning(f"Failed to emit event '{event_type}': {e}")
+
+    def _extract_task_details(self, task: TaskNode) -> Dict[str, Any]:
+        """Extract task details for event data."""
+        return {
+            "task_id": task.task_id,
+            "parent_id": task.parent_id,
+            "goal": task.goal,
+            "task_type": task.task_type.value if task.task_type else None,
+            "node_type": task.node_type.value if task.node_type else None,
+            "status": task.status.value if task.status else None,
+            "result": task.result,
+            "depth": task.depth
+        }
+
+    def _emit_node_added(self, task: TaskNode) -> None:
+        """Emit node_added event."""
+        logger.debug(f"Emitting node_added event for task: {task.task_id[:8]} - {task.goal[:50]}")
+        self._emit_event("node_added", self._extract_task_details(task))
+
+    def _emit_node_updated(self, task: TaskNode) -> None:
+        """Emit node_updated event."""
+        self._emit_event("node_updated", self._extract_task_details(task))
+
+    def _emit_dependency_added(self, from_task_id: str, to_task_id: str) -> None:
+        """Emit dependency_added event."""
+        self._emit_event("dependency_added", {
+            "from_task_id": from_task_id,
+            "to_task_id": to_task_id
+        })
